@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Кадастр объектов недвижимости</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+    <script>const _w=console.warn;console.warn=function(){if(!String(arguments[0]||'').includes('tailwindcss.com'))_w.apply(console,arguments)}</script>
+    <script>
+        if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        };
+    </script>
+    <style>
+        .toast { animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+    <nav class="bg-white dark:bg-gray-800 shadow-md dark:shadow-gray-900">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center space-x-8">
+                    <a href="#" onclick="showPage('home')" class="text-xl font-bold text-indigo-600 dark:text-indigo-400">Кадастр</a>
+                    <a href="#" onclick="showPage('properties')" class="text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400">Все объекты</a>
+                    <a href="#" onclick="showPage('leaderboard')" class="text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400">Рейтинг</a>
+                    <a href="#" id="nav-admin" onclick="showPage('admin')" class="text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hidden">Админ</a>
+                </div>
+                <div class="flex items-center space-x-4" id="nav-auth">
+                    <button onclick="toggleTheme()" class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" title="Переключить тему">
+                        <svg id="theme-icon-light" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                        <svg id="theme-icon-dark" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                    </button>
+                    <div id="nav-guest" class="flex items-center space-x-4">
+                        <a href="#" onclick="showPage('login')" class="text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400">Войти</a>
+                        <a href="#" onclick="showPage('register')" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Регистрация</a>
+                    </div>
+                    <div id="nav-user" class="hidden items-center space-x-4">
+                        <a href="#" onclick="showPage('profile')" class="flex items-center space-x-2 text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400">
+                            <span class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-medium" id="user-initial"></span>
+                            <span class="hidden sm:block" id="user-nickname"></span>
+                        </a>
+                        <button onclick="logout()" class="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600">Выйти</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" id="main-content"></main>
+
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        const API = '/api';
+        let token = localStorage.getItem('token');
+        let user = JSON.parse(localStorage.getItem('user') || 'null');
+
+        function showToast(msg, type = 'success') {
+            const c = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            const colors = { success: 'bg-green-500', error: 'bg-red-500', info: 'bg-indigo-500' };
+            el.className = `toast ${colors[type]} text-white px-4 py-3 rounded-lg shadow-lg`;
+            el.textContent = msg;
+            c.appendChild(el);
+            setTimeout(() => { el.remove(); }, 4000);
+        }
+
+        async function api(method, path, body) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const res = await fetch(`${API}${path}`, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            if (res.status === 204) return null;
+            if (res.status === 401) { logout(); return null; }
+            if (!res.ok) {
+                try {
+                    const err = await res.json();
+                    const msg = typeof err.detail === 'object' ? err.detail.message : (err.detail || 'Ошибка сервера');
+                    throw new Error(msg);
+                } catch (e) {
+                    if (e.message && e.message !== 'Ошибка сервера') throw e;
+                    throw new Error(`Ошибка ${res.status}: сервер временно недоступен. Попробуйте ещё раз.`);
+                }
+            }
+            return res.json();
+        }
+
+        function updateNav() {
+            if (user) {
+                document.getElementById('nav-guest').classList.add('hidden');
+                document.getElementById('nav-user').classList.remove('hidden');
+                document.getElementById('user-initial').textContent = user.nickname[0].toUpperCase();
+                document.getElementById('user-nickname').textContent = user.nickname;
+                if (user.is_admin) document.getElementById('nav-admin').classList.remove('hidden');
+                else document.getElementById('nav-admin').classList.add('hidden');
+            } else {
+                document.getElementById('nav-guest').classList.remove('hidden');
+                document.getElementById('nav-user').classList.add('hidden');
+                document.getElementById('nav-admin').classList.add('hidden');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            token = null;
+            user = null;
+            updateNav();
+            showPage('home');
+            showToast('Вы вышли из системы', 'info');
+        }
+
+        function formatDate(d) {
+            return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.classList.toggle('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            document.getElementById('theme-icon-light').classList.toggle('hidden', isDark);
+            document.getElementById('theme-icon-dark').classList.toggle('hidden', !isDark);
+        }
+
+        (function initTheme() {
+            if (document.documentElement.classList.contains('dark')) {
+                document.getElementById('theme-icon-light').classList.add('hidden');
+                document.getElementById('theme-icon-dark').classList.remove('hidden');
+            }
+        })();
+
+        // Pages
+        function showPage(name) {
+            const m = document.getElementById('main-content');
+            switch (name) {
+                case 'home': renderHome(m); break;
+                case 'login': renderLogin(m); break;
+                case 'register': renderRegister(m); break;
+                case 'forgot': renderForgot(m); break;
+                case 'properties': renderProperties(m); break;
+                case 'leaderboard': renderLeaderboard(m); break;
+                case 'profile': if (user) renderProfile(m); else showPage('login'); break;
+                case 'admin': if (user?.is_admin) renderAdmin(m); else showPage('home'); break;
+            }
+        }
+
+        function renderHome(m) {
+            m.innerHTML = `
+            <div class="max-w-2xl mx-auto">
+                <div class="text-center mb-12">
+                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white mb-4">Кадастр объектов недвижимости</h1>
+                    <p class="text-lg text-gray-600 dark:text-gray-400">Проверяйте и добавляйте объекты недвижимости в общую базу.</p>
+                    <div class="mt-6"><a href="#" onclick="showPage('properties')" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">Посмотреть все объекты &rarr;</a></div>
+                </div>
+                ${user ? `
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h2 class="text-2xl font-semibold text-gray-900 dark:text-white mb-6">Добавить объект</h2>
+                    <form onsubmit="addProperty(event)" class="space-y-5">
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Адрес *</label><input type="text" id="prop-address" placeholder="г. Москва, ул. Тверская, д. 1" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Наименование *</label><input type="text" id="prop-name" placeholder="ЖК Солнечный" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ссылка</label><input type="url" id="prop-link" placeholder="https://example.com" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white"></div>
+                        <div class="flex gap-2">
+                            <button type="submit" id="prop-submit" class="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition">Проверить и добавить</button>
+                            <button type="button" onclick="document.getElementById('import-file').click()" class="px-4 py-3 border border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition text-sm">Импорт CSV</button>
+                        </div>
+                    </form>
+                    <input type="file" id="import-file" accept=".csv" onchange="doImport(event)" class="hidden">
+                    <div id="import-result" class="mt-3 hidden text-sm"></div>
+                </div>` : `
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8 text-center">
+                    <h2 class="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Начните прямо сейчас</h2>
+                    <p class="text-gray-600 dark:text-gray-400 mb-6">Для добавления объектов необходимо авторизоваться</p>
+                    <div class="flex justify-center space-x-4">
+                        <a href="#" onclick="showPage('login')" class="px-6 py-3 border border-indigo-600 dark:border-indigo-400 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium hover:bg-indigo-50 dark:hover:bg-indigo-900/30">Войти</a>
+                        <a href="#" onclick="showPage('register')" class="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700">Зарегистрироваться</a>
+                    </div>
+                </div>`}
+                <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-6 text-center"><div class="text-3xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">1</div><h3 class="font-medium text-gray-900 dark:text-white">Проверка дубликатов</h3><p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Умная нормализация адресов</p></div>
+                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-6 text-center"><div class="text-3xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">2</div><h3 class="font-medium text-gray-900 dark:text-white">Рейтинг</h3><p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Баллы за каждый объект</p></div>
+                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-6 text-center"><div class="text-3xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">3</div><h3 class="font-medium text-gray-900 dark:text-white">Экспорт данных</h3><p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Выгрузка реестра в CSV</p></div>
+                </div>
+            </div>`;
+        }
+
+        async function addProperty(e) {
+            e.preventDefault();
+            const btn = document.getElementById('prop-submit');
+            btn.disabled = true; btn.textContent = 'Проверка...';
+            try {
+                await api('POST', '/properties', {
+                    address: document.getElementById('prop-address').value.trim(),
+                    name: document.getElementById('prop-name').value.trim(),
+                    link: document.getElementById('prop-link').value.trim() || undefined,
+                });
+                showToast('Объект успешно добавлен!');
+                document.getElementById('prop-address').value = '';
+                document.getElementById('prop-name').value = '';
+                document.getElementById('prop-link').value = '';
+            } catch (err) { showToast(err.message, 'error'); }
+            finally { btn.disabled = false; btn.textContent = 'Проверить и добавить'; }
+        }
+
+        async function doImport(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const resultDiv = document.getElementById('import-result');
+            resultDiv.className = 'mt-3 text-sm text-gray-600';
+            resultDiv.textContent = 'Импорт...';
+            resultDiv.classList.remove('hidden');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const headers = {};
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            try {
+                const res = await fetch('/api/import/csv', { method: 'POST', headers, body: formData });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: 'Ошибка сервера' }));
+                    throw new Error(typeof err.detail === 'object' ? err.detail.message : (err.detail || 'Ошибка'));
+                }
+                const data = await res.json();
+                resultDiv.className = 'mt-3 p-3 rounded-lg text-sm bg-green-50 text-green-800';
+                let msg = `Готово! Добавлено: ${data.imported}, пропущено дубликатов: ${data.skipped_duplicates}, всего строк: ${data.total}`;
+                if (data.author_matched > 0) msg += ` | Привязано к авторам: ${data.author_matched}`;
+                if (data.author_default > 0) msg += ` | Без автора: ${data.author_default}`;
+                if (data.errors.length) msg += ' | Ошибки: ' + data.errors.join('; ');
+                resultDiv.textContent = msg;
+                e.target.value = '';
+            } catch (err) {
+                resultDiv.className = 'mt-3 p-3 rounded-lg text-sm bg-red-50 text-red-700';
+                resultDiv.textContent = err.message;
+            }
+            resultDiv.classList.remove('hidden');
+        }
+
+        function renderLogin(m) {
+            m.innerHTML = `
+            <div class="max-w-md mx-auto mt-8">
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Вход</h1>
+                    <form onsubmit="doLogin(event)" class="space-y-5">
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label><input type="email" id="login-email" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Пароль</label><input type="password" id="login-password" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <button type="submit" id="login-btn" class="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition">Войти</button>
+                    </form>
+                    <p class="text-center text-sm text-gray-500 dark:text-gray-400 mt-4"><a href="#" onclick="showPage('forgot')" class="text-indigo-600 dark:text-indigo-400 hover:underline">Забыли пароль?</a></p>
+                    <p class="text-center text-sm text-gray-500 dark:text-gray-400 mt-2">Нет аккаунта? <a href="#" onclick="showPage('register')" class="text-indigo-600 dark:text-indigo-400 hover:underline">Зарегистрироваться</a></p>
+                </div>
+            </div>`;
+        }
+
+        function renderForgot(m) {
+            m.innerHTML = `
+            <div class="max-w-md mx-auto mt-8">
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Восстановление пароля</h1>
+                    <div id="forgot-step1">
+                        <p class="text-gray-600 dark:text-gray-400 mb-4 text-sm">Введите email для получения инструкций по сбросу пароля.</p>
+                        <form onsubmit="doForgot(event)" class="space-y-5">
+                            <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label><input type="email" id="forgot-email" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                            <button type="submit" id="forgot-btn" class="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition">Отправить</button>
+                        </form>
+                    </div>
+                    <div id="forgot-step2" class="hidden">
+                        <p class="text-gray-600 dark:text-gray-400 mb-4 text-sm" id="forgot-msg"></p>
+                        <form onsubmit="doReset(event)" class="space-y-5">
+                            <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Токен восстановления</label><input type="text" id="reset-token" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                            <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Новый пароль</label><input type="password" id="reset-password" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required minlength="8"></div>
+                            <button type="submit" id="reset-btn" class="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition">Сменить пароль</button>
+                        </form>
+                    </div>
+                    <p class="text-center text-sm text-gray-500 dark:text-gray-400 mt-6"><a href="#" onclick="showPage('login')" class="text-indigo-600 dark:text-indigo-400 hover:underline">Вернуться ко входу</a></p>
+                </div>
+            </div>`;
+        }
+
+        async function doForgot(e) {
+            e.preventDefault();
+            const btn = document.getElementById('forgot-btn');
+            btn.disabled = true; btn.textContent = 'Отправка...';
+            try {
+                const email = document.getElementById('forgot-email').value;
+                const res = await api('POST', '/password/forgot', { email });
+                document.getElementById('forgot-step1').classList.add('hidden');
+                document.getElementById('forgot-step2').classList.remove('hidden');
+                if (res.dev_token) {
+                    document.getElementById('forgot-msg').textContent = 'Токен (для отладки): ' + res.dev_token;
+                    document.getElementById('reset-token').value = res.dev_token;
+                }
+                showToast(res.message);
+            } catch (err) { showToast(err.message, 'error'); }
+            finally { btn.disabled = false; btn.textContent = 'Отправить'; }
+        }
+
+        async function doReset(e) {
+            e.preventDefault();
+            const btn = document.getElementById('reset-btn');
+            btn.disabled = true; btn.textContent = 'Смена пароля...';
+            try {
+                const res = await api('POST', '/password/reset', {
+                    token: document.getElementById('reset-token').value,
+                    new_password: document.getElementById('reset-password').value,
+                });
+                showToast(res.message);
+                showPage('login');
+            } catch (err) { showToast(err.message, 'error'); }
+            finally { btn.disabled = false; btn.textContent = 'Сменить пароль'; }
+        }
+
+        async function doLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true; btn.textContent = 'Вход...';
+            try {
+                const res = await api('POST', '/auth/login', {
+                    email: document.getElementById('login-email').value,
+                    password: document.getElementById('login-password').value,
+                });
+                token = res.access_token;
+                user = res.user;
+                localStorage.setItem('token', token);
+                localStorage.setItem('user', JSON.stringify(user));
+                updateNav();
+                showToast('Добро пожаловать!');
+                showPage('home');
+            } catch (err) { showToast(err.message, 'error'); }
+            finally { btn.disabled = false; btn.textContent = 'Войти'; }
+        }
+
+        function renderRegister(m) {
+            m.innerHTML = `
+            <div class="max-w-md mx-auto mt-8">
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Регистрация</h1>
+                    <form onsubmit="doRegister(event)" class="space-y-5">
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email *</label><input type="email" id="reg-email" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Никнейм *</label><input type="text" id="reg-nickname" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required minlength="2"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Полное имя</label><input type="text" id="reg-fullname" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Пароль *</label><input type="password" id="reg-password" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required minlength="8"></div>
+                        <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Подтверждение *</label><input type="password" id="reg-password2" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white" required></div>
+                        <button type="submit" id="reg-btn" class="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition">Зарегистрироваться</button>
+                    </form>
+                    <p class="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">Есть аккаунт? <a href="#" onclick="showPage('login')" class="text-indigo-600 dark:text-indigo-400 hover:underline">Войти</a></p>
+                </div>
+            </div>`;
+        }
+
+        async function doRegister(e) {
+            e.preventDefault();
+            if (document.getElementById('reg-password').value !== document.getElementById('reg-password2').value) {
+                showToast('Пароли не совпадают', 'error'); return;
+            }
+            const btn = document.getElementById('reg-btn');
+            btn.disabled = true; btn.textContent = 'Регистрация...';
+            try {
+                const res = await api('POST', '/auth/register', {
+                    email: document.getElementById('reg-email').value,
+                    nickname: document.getElementById('reg-nickname').value,
+                    full_name: document.getElementById('reg-fullname').value || null,
+                    password: document.getElementById('reg-password').value,
+                });
+                token = res.access_token;
+                user = res.user;
+                localStorage.setItem('token', token);
+                localStorage.setItem('user', JSON.stringify(user));
+                updateNav();
+                showToast('Регистрация успешна!');
+                showPage('home');
+            } catch (err) { showToast(err.message, 'error'); }
+            finally { btn.disabled = false; btn.textContent = 'Зарегистрироваться'; }
+        }
+
+        function renderProperties(m) {
+            m.innerHTML = `<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-6">Все объекты</h1>
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <form onsubmit="loadProperties(event)" class="flex-1 flex gap-2 min-w-[300px]">
+                        <input type="text" id="prop-search" placeholder="Поиск по адресу или наименованию..." class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white dark:bg-gray-700 dark:text-white">
+                        <button type="submit" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Найти</button>
+                    </form>
+                    <a href="/api/export/properties/csv" target="_blank" class="px-4 py-2 border border-green-600 dark:border-green-400 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 transition flex items-center gap-1 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        CSV
+                    </a>
+                    <a href="/api/export/properties/xlsx" target="_blank" class="px-4 py-2 border border-green-600 dark:border-green-400 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 transition flex items-center gap-1 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Excel
+                    </a>
+                </div>
+                <div id="prop-table" class="flex justify-center py-16"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div></div>
+                <div id="prop-pagination" class="text-center mt-4"></div>`;
+            loadProperties();
+        }
+
+        async function loadProperties(e) {
+            if (e) e.preventDefault();
+            const search = document.getElementById('prop-search')?.value || '';
+            const params = new URLSearchParams({ page: currentPage, page_size: 50, sort_by: 'created_at', sort_order: 'desc' });
+            if (search) params.set('search', search);
+            const data = await api('GET', `/properties?${params}`);
+            const t = document.getElementById('prop-table');
+            if (!data.items.length) {
+                t.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-16 text-center text-gray-500 dark:text-gray-400">${search ? 'Ничего не найдено' : 'Нет объектов'}</div>`;
+            } else {
+                const formatExtra = (ed) => ed ? Object.entries(ed).map(([k,v]) => `${html(k)}: ${html(String(v))}`).join(', ') : '';
+                const extraBadge = (ed) => ed && Object.keys(ed).length > 0 ? `<span class="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full cursor-help" title="${html(formatExtra(ed))}">${Object.keys(ed).length} пол.</span>` : '<span class="text-gray-400 dark:text-gray-500 text-xs">—</span>';
+                t.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 overflow-x-auto"><table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-700"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Наименование</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Адрес</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Ссылка</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Доп. поля</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Пользователь</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Дата</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">${data.items.map(p => `
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-[200px] truncate" title="${html(p.name)}">${html(p.name)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-[300px] truncate" title="${html(p.address)}">${html(p.address)}</td>
+                            <td class="px-4 py-3 text-sm">${p.link ? `<a href="${html(p.link)}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">Открыть</a>` : '<span class="text-gray-400 dark:text-gray-500">—</span>'}</td>
+                            <td class="px-4 py-3 text-sm">${extraBadge(p.extra_data)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${html(p.user_nickname)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${formatDate(p.created_at)}</td>
+                        </tr>`).join('')}</tbody></table></div>`;
+            }
+            document.getElementById('prop-pagination').innerHTML = renderPagination(data.page, data.pages, (p) => { currentPage = p; loadProperties(); });
+        }
+
+        let currentPage = 1;
+        function renderPagination(page, pages, cb) {
+            if (pages <= 1) return '';
+            let h = '<div class="flex justify-center items-center space-x-1 mt-6">';
+            h += `<button onclick="void(0)" class="px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 ${page<=1?'opacity-50 cursor-not-allowed':''}" ${page>1?`onclick="void(0)"`:''}>${page>1?`<a href="#" onclick="event.preventDefault();setPage(${page-1})"`:'<span'}>&laquo;</${page>1?'a':'span'}>`;
+            for (let p = 1; p <= pages; p++) {
+                if (pages > 7 && p > 2 && p < pages - 1 && Math.abs(p - page) > 1) {
+                    if (p == 3) h += '<span class="px-2 text-gray-400 dark:text-gray-500">...</span>';
+                    continue;
+                }
+                h += `<a href="#" onclick="event.preventDefault();setPage(${p})" class="px-3 py-2 rounded-lg border dark:border-gray-600 ${p===page?'bg-indigo-600 text-white border-indigo-600':'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}">${p}</a>`;
+            }
+            h += `${page<pages?`<a href="#" onclick="event.preventDefault();setPage(${page+1})"`:'<span'} class="px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 ${page>=pages?'opacity-50 cursor-not-allowed':''}">&raquo;</${page<pages?'a':'span'}>`;
+            h += '</div>';
+            window.setPage = (p) => { currentPage = p; loadProperties(); };
+            return h;
+        }
+
+        function renderProfile(m) {
+            if (!user) return;
+            m.innerHTML = `<div class="max-w-4xl mx-auto">
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8 mb-8">
+                    <div class="flex items-center space-x-4 mb-6">
+                        <div class="w-16 h-16 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-2xl font-bold">${user.nickname[0].toUpperCase()}</div>
+                        <div><h1 class="text-2xl font-bold text-gray-900 dark:text-white">${html(user.nickname)}</h1><p class="text-gray-500 dark:text-gray-400">${html(user.email)}</p></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="bg-indigo-50 dark:bg-indigo-900/30 rounded-xl p-4"><div class="text-sm text-indigo-600 dark:text-indigo-400 font-medium">Активность</div><div class="text-3xl font-bold text-indigo-900 dark:text-indigo-300">${user.properties_count}</div><div class="text-xs text-indigo-500 dark:text-indigo-400">объектов</div></div>
+                        <div class="bg-green-50 dark:bg-green-900/30 rounded-xl p-4"><div class="text-sm text-green-600 dark:text-green-400 font-medium">Рейтинг</div><div class="text-3xl font-bold text-green-900 dark:text-green-300">${user.rating.toFixed(1)}</div><div class="text-xs text-green-500 dark:text-green-400">баллов</div></div>
+                    </div>
+                    <div class="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1" id="profile-tabs">
+                        <button onclick="showProfileTab('info')" class="flex-1 py-2 rounded-md text-sm font-medium bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-400 shadow-sm">Инфо</button>
+                        <button onclick="showProfileTab('mylist')" class="flex-1 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-400">Мои объекты</button>
+                    </div>
+                </div>
+                <div id="profile-tab-content"></div>
+            </div>`;
+            showProfileTab('info');
+        }
+
+        async function showProfileTab(tab) {
+            document.querySelectorAll('#profile-tabs button').forEach((b, i) => {
+                b.className = `flex-1 py-2 rounded-md text-sm font-medium ${(i===0&&tab==='info')||(i===1&&tab==='mylist')?'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-400 shadow-sm':'text-gray-600 dark:text-gray-400'}`;
+            });
+            const c = document.getElementById('profile-tab-content');
+            if (tab === 'info') {
+                const me = await api('GET', '/users/me/profile');
+                user = { ...user, properties_count: me.properties_count, rating: me.rating };
+                localStorage.setItem('user', JSON.stringify(user));
+                c.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">О себе</h2>
+                    <dl class="space-y-3">
+                        <div class="flex justify-between py-2 border-b dark:border-gray-700"><dt class="text-gray-500 dark:text-gray-400">Никнейм</dt><dd class="text-gray-900 dark:text-gray-100 font-medium">${html(user.nickname)}</dd></div>
+                        <div class="flex justify-between py-2 border-b dark:border-gray-700"><dt class="text-gray-500 dark:text-gray-400">Email</dt><dd class="text-gray-900 dark:text-gray-100">${html(user.email)}</dd></div>
+                        <div class="flex justify-between py-2 border-b dark:border-gray-700"><dt class="text-gray-500 dark:text-gray-400">Роль</dt><dd class="text-gray-900 dark:text-gray-100">${user.is_admin?'Администратор':'Пользователь'}</dd></div>
+                        <div class="flex justify-between py-2 border-b dark:border-gray-700"><dt class="text-gray-500 dark:text-gray-400">Регистрация</dt><dd class="text-gray-900 dark:text-gray-100">${formatDate(user.created_at)}</dd></div>
+                        <div class="flex justify-between py-2"><dt class="text-gray-500 dark:text-gray-400">Объектов</dt><dd class="text-gray-900 dark:text-gray-100 font-medium">${me.properties_count}</dd></div>
+                    </dl>
+                </div>`;
+            } else {
+                const res = await api('GET', '/users/me/properties?page=1&page_size=50');
+                c.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg dark:shadow-gray-900 p-8">
+                    <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Мои объекты (${res.total})</h2>
+                    ${res.items.length ? res.items.map(p => `
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-3">
+                            <div class="flex justify-between items-start">
+                                <div><h3 class="font-medium text-gray-900 dark:text-gray-100">${html(p.name)}</h3><p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${html(p.address)}</p><p class="text-xs text-gray-400 dark:text-gray-500 mt-2">${formatDate(p.created_at)}${p.link?` &middot; <a href="${html(p.link)}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">Ссылка</a>`:''}</p></div>
+                                <button onclick="deleteMyProperty('${p.id}')" class="text-red-500 hover:text-red-700 text-sm">Удалить</button>
+                            </div>
+                        </div>`).join('') : '<div class="text-center py-8 text-gray-500 dark:text-gray-400">Вы ещё не добавили ни одного объекта</div>'}
+                </div>`;
+            }
+        }
+
+        async function deleteMyProperty(id) {
+            if (!confirm('Удалить объект?')) return;
+            try {
+                await api('DELETE', `/properties/${id}`);
+                showToast('Объект удалён');
+                showProfileTab('mylist');
+                const me = await api('GET', '/users/me/profile');
+                user = { ...user, properties_count: me.properties_count, rating: me.rating };
+                localStorage.setItem('user', JSON.stringify(user));
+            } catch (err) { showToast(err.message, 'error'); }
+        }
+
+        async function renderAdmin(m) {
+            if (!user?.is_admin) { showPage('home'); return; }
+            m.innerHTML = `<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-6">Панель администратора</h1>
+                <div class="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-6 max-w-xs" id="admin-tabs">
+                    <button onclick="showAdminTab('users')" class="flex-1 py-2 rounded-md text-sm font-medium bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-400 shadow-sm">Пользователи</button>
+                    <button onclick="showAdminTab('props')" class="flex-1 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-400">Объекты</button>
+                </div>
+                <div id="admin-tab-content"><div class="flex justify-center py-16"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div></div></div>`;
+            showAdminTab('users');
+        }
+
+        async function showAdminTab(tab) {
+            document.querySelectorAll('#admin-tabs button').forEach((b, i) => {
+                b.className = `flex-1 py-2 rounded-md text-sm font-medium ${(i===0&&tab==='users')||(i===1&&tab==='props')?'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-400 shadow-sm':'text-gray-600 dark:text-gray-400'}`;
+            });
+            const c = document.getElementById('admin-tab-content');
+            if (tab === 'users') {
+                const res = await api('GET', '/admin/users?page=1&page_size=50');
+                if (!res) { c.innerHTML = '<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-16 text-center text-gray-500 dark:text-gray-400">Нет доступа</div>'; return; }
+                c.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 overflow-x-auto"><table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-700"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Никнейм</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Email</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Объектов</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Рейтинг</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Роль</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Статус</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Действия</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">${res.items.map(u => `
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">${html(u.nickname)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${html(u.email)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${u.properties_count}</td>
+                            <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${u.rating.toFixed(1)}</td>
+                            <td class="px-4 py-3 text-sm"><span class="text-xs px-2 py-0.5 rounded-full ${u.is_admin?'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400':'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}">${u.is_admin?'Админ':'Юзер'}</span></td>
+                            <td class="px-4 py-3 text-sm"><span class="text-xs px-2 py-0.5 rounded-full ${u.is_active?'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400':'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}">${u.is_active?'Активен':'Заблок.'}</span></td>
+                            <td class="px-4 py-3 text-sm space-x-2">
+                                <button onclick="adminToggle('${u.id}', 'admin', ${!u.is_admin})" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs">${u.is_admin?'Снять админа':'Сделать админом'}</button>
+                                <button onclick="adminToggle('${u.id}', 'active', ${!u.is_active})" class="${u.is_active?'text-red-600 dark:text-red-400':'text-green-600 dark:text-green-400'} hover:underline text-xs">${u.is_active?'Заблокировать':'Разблокировать'}</button>
+                            </td>
+                        </tr>`).join('')}</tbody>
+                </table></div>`;
+            } else {
+                const res = await api('GET', '/admin/properties?page=1&page_size=50');
+                if (!res) { c.innerHTML = '<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-16 text-center text-gray-500 dark:text-gray-400">Нет доступа</div>'; return; }
+                c.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 overflow-x-auto"><table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-700"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Название</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Адрес</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Пользователь</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Дата</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Действия</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">${res.items.map(p => `
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-[180px] truncate">${html(p.name)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-[250px] truncate">${html(p.address)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${html(p.user_nickname)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${formatDate(p.created_at)}</td>
+                            <td class="px-4 py-3 text-sm"><button onclick="adminDeleteProp('${p.id}')" class="text-red-600 dark:text-red-400 hover:underline text-xs">Удалить</button></td>
+                        </tr>`).join('')}</tbody>
+                </table></div>`;
+            }
+        }
+
+        async function adminToggle(userId, field, value) {
+            try {
+                await api('PUT', `/admin/users/${userId}`, { [field === 'admin' ? 'is_admin' : 'is_active']: value });
+                showToast('Обновлено');
+                showAdminTab('users');
+            } catch (err) { showToast(err.message, 'error'); }
+        }
+
+        async function adminDeleteProp(id) {
+            if (!confirm('Удалить объект безвозвратно?')) return;
+            try {
+                await api('DELETE', `/admin/properties/${id}`);
+                showToast('Объект удалён');
+                showAdminTab('props');
+            } catch (err) { showToast(err.message, 'error'); }
+        }
+
+        function html(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+        function renderLeaderboard(m) {
+            m.innerHTML = `<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-6">Рейтинг пользователей</h1>
+                <div id="lb-content" class="flex justify-center py-16"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div></div>
+                <div id="lb-pagination" class="text-center mt-4"></div>`;
+            loadLeaderboard(1);
+        }
+
+        let lbCurrentPage = 1;
+
+        async function loadLeaderboard(page) {
+            lbCurrentPage = page;
+            const data = await api('GET', `/leaderboard?page=${page}&page_size=20`);
+            const c = document.getElementById('lb-content');
+            if (!data.items.length) {
+                c.innerHTML = '<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 p-16 text-center text-gray-500 dark:text-gray-400">Пока нет участников</div>';
+            } else {
+                const medals = ['🥇','🥈','🥉'];
+                c.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-xl shadow dark:shadow-gray-900 overflow-x-auto"><table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-700"><tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Место</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Пользователь</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Объектов</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Рейтинг</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">${data.items.map((u, i) => `
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 ${u.rank<=3?'bg-yellow-50 dark:bg-yellow-900/20':''}">
+                            <td class="px-4 py-3 text-center font-bold ${u.rank<=3?'text-xl':'text-sm text-gray-700 dark:text-gray-300'}">${u.rank<=3?medals[u.rank-1]:u.rank}</td>
+                            <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">${html(u.nickname)}</td>
+                            <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">${u.properties_count}</td>
+                            <td class="px-4 py-3 text-sm font-bold text-indigo-600 dark:text-indigo-400">${u.rating.toFixed(1)}</td>
+                        </tr>`).join('')}</tbody></table></div>`;
+            }
+            document.getElementById('lb-pagination').innerHTML = renderPagination(data.page, data.pages, (p) => loadLeaderboard(p));
+        }
+
+        function downloadCSV() {
+            window.open('/api/export/properties/csv', '_blank');
+        }
+
+        updateNav();
+        showPage('home');
+    </script>
+</body>
+</html>

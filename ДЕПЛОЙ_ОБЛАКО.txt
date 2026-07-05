@@ -1,0 +1,61 @@
+================================================================================
+         ДЕПЛОЙ В ОБЛАКО — ПОШАГОВАЯ ИНСТРУКЦИЯ
+================================================================================
+
+ЧТО ПОЛУЧИТСЯ: приложение доступно из интернета по ссылке
+               https://cadastre-xxxx.onrender.com
+               Работает 24/7, общая база для всех пользователей.
+
+
+ШАГ 1 — GitHub (2 минуты)
+--------------------------
+1. Откройте https://github.com
+2. Нажмите Sign up → создайте аккаунт
+3. Нажмите "+" (справа вверху) → New repository
+4. Имя: cadastre → Create repository
+5. На открывшейся странице нажмите "uploading an existing file"
+6. Перетащите ВСЕ файлы из папки проекта в окно браузера
+7. Нажмите "Commit changes"
+
+
+ШАГ 2 — Render (3 минуты)
+--------------------------
+1. Откройте https://render.com
+2. Нажмите "Get Started" → войдите через GitHub
+3. Dashboard → New → Web Service
+4. Выберите репозиторий cadastre → Connect
+5. Настройки:
+   Name:          cadastre
+   Root Dir:      backend
+   Build Command: pip install -r requirements.txt
+   Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   Plan:          Free
+6. Нажмите "Create Web Service" → ждите 3-5 минут сборки
+
+
+ШАГ 3 — База данных (2 минуты)
+-------------------------------
+1. Dashboard → New → PostgreSQL
+2. Name: cadastre-db → Create Database
+3. После создания откройте cadastre-db
+4. Скопируйте "Internal Database URL"
+5. Откройте Web Service cadastre → Environment
+6. Добавьте переменную:
+   DATABASE_URL = <вставьте скопированный URL>
+7. Нажмите "Save Changes" → подождите перезапуска
+
+
+ШАГ 4 — Проверка
+----------------
+1. Откройте Dashboard → cadastre → там будет ссылка:
+   https://cadastre.onrender.com
+2. Войдите: admin@cadastre.ru / Admin123
+3. Всё работает!
+
+
+ДЛЯ ОБНОВЛЕНИЯ ПРИЛОЖЕНИЯ
+--------------------------
+Загрузите новые файлы на GitHub → Render пересоберёт автоматически.
+
+
+================================================================================

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: cadastre
+    runtime: python
+    region: frankfurt
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cadastre-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: APP_NAME
+        value: Кадастр объектов недвижимости
+      - key: DEBUG
+        value: "false"
+    autoDeploy: true
+
+  - type: database
+    name: cadastre-db
+    databaseName: cadastre
+    plan: free
+    ipAllowList: []
