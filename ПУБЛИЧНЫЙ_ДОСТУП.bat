@@ -14,6 +14,7 @@ timeout /t 2 /nobreak >nul
 
 echo Запуск сервера...
 cd /d "%~dp0backend"
+set PYTHONPATH=%CD%
 start /b python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 echo Ожидание запуска сервера...

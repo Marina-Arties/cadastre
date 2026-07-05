@@ -63,5 +63,6 @@ echo   Закройте это окно для остановки.
 echo ============================================
 echo.
 start http://localhost:8000
+set PYTHONPATH=%CD%
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 pause
